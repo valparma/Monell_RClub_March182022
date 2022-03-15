@@ -1,0 +1,1002 @@
+```{r include=FALSE}
+# Install/Load Packages
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg))
+    install.packages(new.pkg, dependencies = TRUE, repos = "http://cran.us.r-project.org")
+  sapply(pkg, require, character.only = TRUE)
+}
+
+packages <- c("psych","ggplot2","tidyverse","scales", "readr", "BayesFactor", "dplyr", "ggstatsplot", "summarytools", "PerformanceAnalytics", "nlme", "multcomp", "effects", "knitr","factoextra","Rmisc", "rgl", "janitor","NbClust", "cluster", "tinytex", "car", "ggpubr", "DiagrammeR", "bootcluster", "DiagrammeRsvg", "rsvg", "FactoMineR", "kableExtra", "unpivotr", "gplots", "heatmap.plus", "htmlTable", "corrplot","gridGraphics", "ggplotify", "flextable", "ggcorrplot")
+
+ipak(packages)
+
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+
+# Upload the database
+data_GCCR001 <- read_csv("/Users/valentinaparma/Documents/Github/GCCR001/analysis/paper/data_GCCR001.csv")
+
+table(data_GCCR001$smell_loss)
+
+# Rename variables 
+# - Clinical exam -> Clinical assessment
+library(plyr)
+data_GCCR001$Group<- as.factor(data_GCCR001$Group)
+levels(data_GCCR001$Group) <- c("Clinical assessment","Lab test")
+levels(data_GCCR001$Group)
+data_GCCR001_withgroup<-data_GCCR001
+# - Nasal_occlusion_change -> Nasal_obstruction_change
+colnames(data_GCCR001)[colnames(data_GCCR001) == "Nasal_occlusion_change"] <- "Nasal_obstruction_change"
+names(data_GCCR001)
+
+# METHODS
+# Participants
+gendertable <- data_GCCR001 %>% tabyl(Gender, Group)
+gender_clin_F<-gendertable[1,2]
+gender_clin_M<-gendertable[2,2]
+gender_clin_other<-gendertable[3,2]
+gender_clin_Notsay<-gendertable[4,2]
+gender_test_F<-gendertable[1,3]
+gender_test_M<-gendertable[2,3]
+gender_test_other<-gendertable[3,3]
+gender_test_Notsay<-gendertable[4,3]
+
+numbwomen<-gender_clin_F + gender_test_F
+numbmen<-gender_clin_M + gender_test_M
+numbother<-gender_clin_other + gender_test_other
+numbnot<-gender_clin_Notsay + gender_test_Notsay
+
+age_mean<- round(mean(data_GCCR001$Age), digits = 2)
+age_sd<- round(sd(data_GCCR001$Age), digits = 2)
+age_range_all<- round(range(data_GCCR001$Age), digits=2)
+agemin<-age_range_all[1]
+agemax<-age_range_all[2]
+
+age_meangroup<- round(tapply(data_GCCR001$Age, data_GCCR001$Group, mean), digits = 2)
+age_sdgroup<- round(tapply(data_GCCR001$Age, data_GCCR001$Group, sd), digits = 2)
+age_rangegroup<- round(range(data_GCCR001$Age), digits=2)
+
+data_GCCR001_clin<-subset(data_GCCR001, Group =="Clinical assessment")
+data_GCCR001_test<-subset(data_GCCR001, Group =="Lab test")
+
+nrow(data_GCCR001)
+
+# RESULTS
+
+######################################
+# Degree of smell loss during COVID-19
+######################################
+# Analysis showing change score different from 0
+bf_smell_0 = ttestBF(x = data_GCCR001$Smell_change, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_smell_0
+# Evidence for H0
+1/bf_smell_0
+
+Smell0Report<-paste('BF~10~',"=",bf_smell_0@bayesFactor$bf %>% round(2),'±',bf_smell_0@bayesFactor$error %>% round(2),'%')
+
+# Analysis with pre-registered default prior
+set.seed(123)
+bf_Smell_change <- lmBF(formula = Smell_change ~ Group, data = data_GCCR001, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_Smell_change
+# Evidence for H0
+1/bf_Smell_change
+
+SmellChangeReport<-paste('BF~10~', '=', 2.17 %>% round(2),'±',bf_Smell_change@bayesFactor$error %>% round(2),'%')
+
+#On top of a Theory testing approach, we will quantify the uncertainty about the parameters by sampling from the posteriori through 10000 iteration of the Markov Chain Monte Carlo sampler implemented in the Bayes Factor library:
+chains_Smell_change = posterior(bf_Smell_change, iterations = 1e4)
+(summ_chains_Smell_change <- summary(chains_Smell_change))
+(Smell_change_LL <- round(summ_chains_Smell_change$quantiles['Group-Clinical assessment', 1]*2, 2))
+(Smell_change_UL <- round(summ_chains_Smell_change$quantiles['Group-Clinical assessment', 5]*2, 2))
+
+CI_SmellChangeReport<-paste('[',Smell_change_LL,',',Smell_change_UL,']')
+
+# Analysis with pre-registered narrow prior
+set.seed(123)
+bf_Smell_change_narrow <- lmBF(formula = Smell_change ~ Group, data = data_GCCR001, rscaleFixed  = .5)
+# Evidence for H1
+bf_Smell_change_narrow
+# Evidence for H0
+1/bf_Smell_change_narrow
+
+# Analysis with pre-registered wide prior
+set.seed(123)
+bf_Smell_change_wide <- lmBF(formula = Smell_change ~ Group, data = data_GCCR001, rscaleFixed = 1)
+# Evidence for H1
+bf_Smell_change_wide
+# Evidence for H0
+1/bf_Smell_change_wide
+
+# Levene test of variance
+LeveneSmell_before_illness <- leveneTest(Smell_before_illness ~ Group, data = data_GCCR001)
+paste('F(', LeveneSmell_before_illness$Df[1], ',', LeveneSmell_before_illness$Df[2], ')', sep = "")
+LeveneSmell_before_illness$`F value`[1] %>% round(2)
+LeveneSmell_before_illness$`Pr(>F)`[1] %>% round(3)
+
+LeveneSmellbefore<- paste('F(', LeveneSmell_before_illness$Df[1], ',', LeveneSmell_before_illness$Df[2], ')', sep = ""," = ", LeveneSmell_before_illness$`F value`[1] %>% round(2),", p = ", LeveneSmell_before_illness$`Pr(>F)`[1] %>% round(3))
+
+tapply(data_GCCR001$Smell_before_illness, data_GCCR001$Group, sd)
+tapply(data_GCCR001$Smell_before_illness, data_GCCR001$Group, mean)
+
+LeveneSmell_during_illness <- leveneTest(Smell_during_illness ~ Group, data = data_GCCR001)
+paste('F(', LeveneSmell_during_illness$Df[1], ',', LeveneSmell_during_illness$Df[2], ')', sep = "")
+LeveneSmell_during_illness$`F value`[1] %>% round(2)
+LeveneSmell_during_illness$`Pr(>F)`[1] %>% round(3)
+
+LeveneSmellduring<- paste('F(', LeveneSmell_during_illness$Df[1], ',', LeveneSmell_during_illness$Df[2], ')', sep = ""," = ", LeveneSmell_during_illness$`F value`[1] %>% round(2),", p = ", LeveneSmell_during_illness$`Pr(>F)`[1] %>% round(3))
+
+tapply(data_GCCR001$Smell_during_illness, data_GCCR001$Group, sd)
+tapply(data_GCCR001$Smell_during_illness, data_GCCR001$Group, mean)
+
+LeveneSmell_change <- leveneTest(Smell_change ~ Group, data = data_GCCR001)
+paste('F(', LeveneSmell_change$Df[1], ',', LeveneSmell_change$Df[2], ')', sep = "")
+LeveneSmell_change$`F value`[1] %>% round(2)
+LeveneSmell_change$`Pr(>F)`[1] %>% round(3)
+tapply(data_GCCR001$Smell_change, data_GCCR001$Group, sd)
+tapply(data_GCCR001$Smell_change, data_GCCR001$Group, mean)
+
+
+##################################
+# Smell qualitative changes
+##################################
+# Parosmia
+parosmiatable <- data_GCCR001 %>% tabyl(parosmia, Group)
+parosmia_clin<-parosmiatable[2,2]
+parosmia_test<-parosmiatable[2,3]
+
+resparosmia <- prop.test(x = c(parosmiatable[2,2], parosmiatable[2,3]), n = c(parosmiatable[1,2], parosmiatable[1,3]))
+ParosmiaReport<-paste('X^2^','(',resparosmia$parameter,')',"=", resparosmia$statistic %>% round(2), ", p = ", resparosmia$p.value %>% round(3), '[',resparosmia$conf.int[1]%>% round(2),' - ', resparosmia$conf.int[2]%>% round(2),']')
+ 
+Percparosmiaclin<-paste(round(parosmia_clin*100/(parosmia_clin+parosmiatable[1,2]),2), "%")             
+Percparosmiatest<-paste(round(parosmia_test*100/(parosmia_test+parosmiatable[1,3]),2), "%")             
+ 
+# Phantosmia
+phantosmiatable <- data_GCCR001 %>% tabyl(phantosmia, Group)
+phantosmia_clin<-phantosmiatable[2,2]
+phantosmia_test<-phantosmiatable[2,3]
+
+resphantosmia <- prop.test(x = c(phantosmiatable[2,2], phantosmiatable[2,3]), n = c(phantosmiatable[1,2], phantosmiatable[1,3]))
+
+PhantosmiaReport<-paste('X^2^','(',resphantosmia$parameter, ')',"=", resphantosmia$statistic %>% round(2), ", p = ", resphantosmia$p.value %>% round(7), "[",resphantosmia$conf.int[1]%>% round(2)," - ", resphantosmia$conf.int[2]%>% round(2),']')
+ 
+Percphantosmiaclin<-paste(round(phantosmia_clin*100/(phantosmia_clin+phantosmiatable[1,2]),2), "%")             
+Percphantosmiatest<-paste(round(phantosmia_test*100/(phantosmia_test+phantosmiatable[1,3]),2), "%")     
+
+
+##################################
+# Degree of taste loss in COVID-19
+##################################
+# Analysis showing change score different from 0
+bf_taste_0 = ttestBF(x = data_GCCR001$Taste_change, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_taste_0
+# Evidence for H0
+1/bf_taste_0
+
+Taste0Report<-paste('BF~10~',bf_taste_0@bayesFactor$bf %>% round(2),'±',bf_taste_0@bayesFactor$error %>% round(2),'%')
+
+# Analysis with pre-registered default prior
+set.seed(123)
+bf_Taste <- lmBF(formula = Taste_change ~ Group, data = data_GCCR001, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_Taste
+# Evidence for H0
+1/bf_Taste
+
+TasteReport<-paste('BF~10~','=', 0.72 %>% round(2),'±',bf_Taste@bayesFactor$error %>% round(2),'%')
+
+#On top of a Theory testing approach, we will quantify the uncertainty about the parameters by sampling from the posteriori through 10000 iteration of the Markov Chain Monte Carlo sampler implemented in the Bayes Factor library:
+chains_Taste = posterior(bf_Taste, iterations = 1e4)
+(summ_chains_Taste <- summary(chains_Taste))
+(Taste_LL <- round(summ_chains_Taste$quantiles['Group-Clinical assessment', 1]*2, 2))
+(Taste_UL <- round(summ_chains_Taste$quantiles['Group-Clinical assessment', 5]*2, 2))
+
+CI_TasteChangeReport<-paste('[', Taste_LL,',',Taste_UL,']')
+
+# Analysis with pre-registered narrow prior
+set.seed(123)
+bf_Taste_narrow <- lmBF(formula = Taste_change ~ Group, data = data_GCCR001, rscaleFixed  = .5)
+# Evidence for H1
+bf_Taste_narrow
+# Evidence for H0
+1/bf_Taste_narrow
+
+# Analysis with pre-registered wide prior
+set.seed(123)
+bf_Taste_wide <- lmBF(formula = Taste_change ~ Group, data = data_GCCR001, rscaleFixed = 1)
+# Evidence for H1
+bf_Taste_wide
+# Evidence for H0
+1/bf_Taste_wide
+
+# Levene test of variance
+LeveneTaste_before_illness <- leveneTest(Taste_before_illness ~ Group, data = data_GCCR001)
+paste('F(', LeveneTaste_before_illness$Df[1], ',', LeveneTaste_before_illness$Df[2], ')', sep = "")
+LeveneTaste_before_illness$`F value`[1] %>% round(2)
+LeveneTaste_before_illness$`Pr(>F)`[1] %>% round(3)
+
+LeveneTastebefore<- paste('F(', LeveneTaste_before_illness$Df[1], ',', LeveneTaste_before_illness$Df[2], ')', sep = ""," = ", LeveneTaste_before_illness$`F value`[1] %>% round(2),", p = ", LeveneTaste_before_illness$`Pr(>F)`[1] %>% round(3))
+
+tapply(data_GCCR001$Taste_before_illness, data_GCCR001$Group, sd)
+tapply(data_GCCR001$Taste_before_illness, data_GCCR001$Group, mean)
+
+LeveneTaste_during_illness <- leveneTest(Taste_during_illness ~ Group, data = data_GCCR001)
+paste('F(', LeveneTaste_during_illness$Df[1], ',', LeveneTaste_during_illness$Df[2], ')', sep = "")
+LeveneTaste_during_illness$`F value`[1] %>% round(2)
+LeveneTaste_during_illness$`Pr(>F)`[1] %>% round(3)
+
+LeveneTasteduring<- paste('F(', LeveneTaste_during_illness$Df[1], ',', LeveneTaste_during_illness$Df[2], ')', sep = ""," = ", LeveneTaste_during_illness$`F value`[1] %>% round(2),", p = ", LeveneTaste_during_illness$`Pr(>F)`[1] %>% round(3))
+
+tapply(data_GCCR001$Taste_during_illness, data_GCCR001$Group, sd)
+tapply(data_GCCR001$Taste_during_illness, data_GCCR001$Group, mean)
+
+LeveneTaste_change <- leveneTest(Taste_change ~ Group, data = data_GCCR001)
+paste('F(', LeveneTaste_change$Df[1], ',', LeveneTaste_change$Df[2], ')', sep = "")
+LeveneTaste_change$`F value`[1] %>% round(2)
+LeveneTaste_change$`Pr(>F)`[1] %>% round(3)
+tapply(data_GCCR001$Taste_change, data_GCCR001$Group, sd)
+tapply(data_GCCR001$Taste_change, data_GCCR001$Group, mean)
+
+
+##################################
+#Taste qualitative changes
+##################################
+data_GCCR001$Tastequalitysum <- data_GCCR001$Changes_in_basic_tastes_sweet + data_GCCR001$Changes_in_basic_tastes_salty+data_GCCR001$Changes_in_basic_tastes_bitter+data_GCCR001$Changes_in_basic_tastes_sour+data_GCCR001$`Changes_in_basic_tastes_savory/umami`
+
+TQT<-tastequalitytable <- data_GCCR001 %>% tabyl(Tastequalitysum, Group)
+
+tastequalityNoresp<- paste(round((TQT[1,2]+TQT[1,3])/nrow(data_GCCR001), 2)*100,"%")
+tastequalityNorespclin<- paste(round((TQT[1,2])/(TQT[1,2]+TQT[2,2]+TQT[3,2]+TQT[4,2]+TQT[5,2]+TQT[6,2]), 2)*100,"%")
+tastequalityNoresptest<- paste(round((TQT[1,3])/(TQT[1,3]+TQT[2,3]+TQT[3,3]+TQT[4,3]+TQT[5,3]+TQT[6,3]), 2)*100,"%")
+
+tastequalityOne<- paste((round((TQT[2,2]+TQT[2,3])/nrow(data_GCCR001), 2))*100, "%")
+tastequalityOneclin<- paste((round((TQT[2,2]+TQT[2,3])/(TQT[1,2]+TQT[2,2]+TQT[3,2]+TQT[4,2]+TQT[5,2]+TQT[6,2]), 2))*100,"%")     
+tastequalityOnetest<- paste((round((TQT[2,2]+TQT[2,3])/(TQT[1,3]+TQT[2,3]+TQT[3,3]+TQT[4,3]+TQT[5,3]+TQT[6,3]), 2))*100,"%")
+
+tastequalityTwoormore<- paste(round((TQT[3,2]+TQT[4,2]+TQT[5,2]+TQT[6,2]+TQT[3,3]+TQT[4,3]+TQT[5,3]+TQT[6,3])/(TQT[1,2]+TQT[2,2]+TQT[3,2]+TQT[4,2]+TQT[5,2]+TQT[6,2]+TQT[1,3]+TQT[2,3]+TQT[3,3]+TQT[4,3]+TQT[5,3]+TQT[6,3]), 2)*100, "%")
+tastequalityTwoormoreclin<- paste((round((TQT[3,2]+TQT[4,2]+TQT[5,2]+TQT[6,2])/(TQT[1,2]+TQT[2,2]+TQT[3,2]+TQT[4,2]+TQT[5,2]+TQT[6,2]), 2))*100,"%")  
+tastequalityTwoormoretest<- paste((round((TQT[3,3]+TQT[4,3]+TQT[5,3]+TQT[6,3])/(TQT[1,3]+TQT[2,3]+TQT[3,3]+TQT[4,3]+TQT[5,3]+TQT[6,3]), 2))*100,"%")
+
+sweettable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_sweet , Group)
+sweet_clin<-sweettable[2,2]
+sweet_test<-sweettable[2,3]
+sweet_clin_n<-sweettable[1,2]+sweettable[2,2]
+sweet_test_n<-sweettable[1,3]+sweettable[2,3]
+
+ressweet <- prop.test(x = c(sweettable[2,2], sweettable[2,3]), n = c(sweet_clin_n,sweet_test_n))
+sweetProoreport<-paste('X^2^','(',ressweet$parameter, ')',"=", ressweet$statistic %>% round(2), ", p = ", ressweet$p.value %>% round(3), " [", ressweet$conf.int[1]," - ", ressweet$conf.int[2], " ]")
+
+salttable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_salty, Group)
+salt_clinperc<-paste((round(salttable[2,2]/(salttable[1,2]+salttable[2,2]),2)*100),"%")
+salt_testperc<-paste((round(salttable[2,3]/(salttable[1,3]+salttable[2,3]),2)*100),"%")
+salt_clin_n<-salttable[1,2]+salttable[2,2]
+salt_test_n<-salttable[1,3]+salttable[2,3]
+
+ressalt <- prop.test(x = c(salttable[2,2], salttable[2,3]), n = c(salt_clin_n,salt_test_n))
+saltProoreport<-paste('X^2^','(',ressalt$parameter, ')',"=", ressalt$statistic %>% round(2), ", p = ", ressalt$p.value %>% round(3), " [", round(ressalt$conf.int[1],2)," - ", round(ressalt$conf.int[2],2), " ]")
+
+sourtable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_sour, Group)
+sour_clin<-sourtable[2,2]
+sour_test<-sourtable[2,3]
+sour_clin_n<-sourtable[1,2]+sourtable[2,2]
+sour_test_n<-sourtable[1,3]+sourtable[2,3]
+
+ressour <- prop.test(x = c(sourtable[2,2], sourtable[2,3]), n = c(sour_clin_n, sour_test_n))
+sourProoreport<-paste('X^2^','(',ressour$parameter, ')',"=", ressour$statistic %>% round(2), ", p = ", ressour$p.value %>% round(3), " [", ressour$conf.int[1]," - ", ressour$conf.int[2], " ]")
+
+bittertable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_bitter , Group)
+bitter_clin<-bittertable[2,2]
+bitter_test<-bittertable[2,3]
+bitter_clin_n<-bittertable[1,2]+bittertable[2,2]
+bitter_test_n<-bittertable[1,3]+bittertable[2,3]
+
+resbitter <- prop.test(x = c(bittertable[2,2], bittertable[2,3]), n = c(bitter_clin_n,bitter_test_n))
+bitterProoreport<-paste('X^2^','(',resbitter$parameter, ')',"=", resbitter$statistic %>% round(2), ", p = ", resbitter$p.value %>% round(3), " [", resbitter$conf.int[1]," - ", resbitter$conf.int[2], " ]")
+
+umamitable <- data_GCCR001 %>% tabyl(`Changes_in_basic_tastes_savory/umami`, Group)
+umami_clinperc<-paste((round(umamitable[2,2]/(umamitable[1,2]+umamitable[2,2]),2)*100),"%")
+umami_testperc<-paste((round(umamitable[2,3]/(umamitable[1,3]+umamitable[2,3]),2)*100),"%")
+umami_clin_n<-umamitable[1,2]+umamitable[2,2]
+umami_test_n<-umamitable[1,3]+umamitable[2,3]
+
+resumami <- prop.test(x = c(umamitable[2,2], umamitable[2,3]), n = c(umami_clin_n,umami_test_n))
+umamiProoreport<-paste('X^2^','(',resumami$parameter, ')',"=", resumami$statistic %>% round(2), ", p = ", resumami$p.value %>% round(3), " [", round(resumami$conf.int[1],2)," - ", round(resumami$conf.int[2],2), " ]")
+
+
+########################################
+#Degree of chemesthesis loss in COVID-19
+########################################
+# Analysis showing change score different from 0
+bf_chemesthesis_0 = ttestBF(x = data_GCCR001$Chemesthesis_change, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_chemesthesis_0
+# Evidence for H0
+1/bf_chemesthesis_0
+
+Chemesthesis0Report<-paste('BF~10~',bf_chemesthesis_0@bayesFactor$bf %>% round(2),'±',bf_chemesthesis_0@bayesFactor$error %>% round(2),'%')
+
+# Analysis with pre-registered default prior
+set.seed(123)
+bf_Chemesthesis <- lmBF(formula = Chemesthesis_change ~ Group, data = data_GCCR001, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_Chemesthesis
+# Evidence for H0
+1/bf_Chemesthesis
+
+ChemesthesisReport<-paste('BF~01~','=', 35.42 %>% round(2),'±',bf_Chemesthesis@bayesFactor$error %>% round(2),'%')
+
+#On top of a Theory testing approach, we will quantify the uncertainty about the parameters by sampling from the posteriori through 10000 iteration of the Markov Chain Monte Carlo sampler implemented in the Bayes Factor library:
+chains_Chemesthesis = posterior(bf_Chemesthesis, iterations = 1e4)
+(summ_chains_Chemesthesis <- summary(chains_Chemesthesis))
+(Chemesthesis_LL <- round(summ_chains_Chemesthesis$quantiles['Group-Clinical assessment', 1]*2, 2))
+(Chemesthesis_UL <- round(summ_chains_Chemesthesis$quantiles['Group-Clinical assessment', 5]*2, 2))
+
+CI_ChemesthesisChangeReport<-paste('[', Chemesthesis_LL,',',Chemesthesis_UL,']')
+
+# Analysis with pre-registered narrow prior
+set.seed(123)
+bf_Chemesthesis_narrow <- lmBF(formula = Chemesthesis_change ~ Group, data = data_GCCR001, rscaleFixed  = .5)
+# Evidence for H1
+bf_Chemesthesis_narrow
+# Evidence for H0
+1/bf_Chemesthesis_narrow
+
+# Analysis with pre-registered wide prior
+set.seed(123)
+bf_Chemesthesis_wide <- lmBF(formula = Chemesthesis_change ~ Group, data = data_GCCR001, rscaleFixed = 1)
+# Evidence for H1
+bf_Chemesthesis_wide
+# Evidence for H0
+1/bf_Chemesthesis_wide
+set.seed(123)
+
+tapply(data_GCCR001$Chemesthesis_change, data_GCCR001$Group, sd)
+tapply(data_GCCR001$Chemesthesis_change, data_GCCR001$Group, mean)
+
+########################################
+#Perceived nasal obstruction in COVID-19
+########################################
+# Analysis showing change score different from 0
+bf_nasal_obstruction_0 = ttestBF(x = data_GCCR001$Nasal_obstruction_change, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_nasal_obstruction_0
+# Evidence for H0
+1/bf_nasal_obstruction_0
+
+Nasal_obstruction0Report<-paste('BF~10~',bf_nasal_obstruction_0@bayesFactor$bf %>% round(2),'±',bf_nasal_obstruction_0@bayesFactor$error %>% round(2),'%')
+
+# Analysis with pre-registered default prior
+set.seed(123)
+bf_Nasal_obstruction <- lmBF(formula = Nasal_obstruction_change ~ Group, data = data_GCCR001, rscaleFixed = sqrt(2)/2)
+# Evidence for H1
+bf_Nasal_obstruction
+# Evidence for H0
+1/bf_Nasal_obstruction
+
+NasalObstructionChangeReport<-paste('BF~01~','=', 14.52 %>% round(2),'±',bf_Nasal_obstruction@bayesFactor$error %>% round(2),'%')
+
+#On top of a Theory testing approach, we will quantify the uncertainty about the parameters by sampling from the posteriori through 10000 iteration of the Markov Chain Monte Carlo sampler implemented in the Bayes Factor library:
+chains_Nasal = posterior(bf_Nasal_obstruction, iterations = 1e4)
+(summ_chains_Nasal <- summary(chains_Nasal))
+(Nasal_LL <- round(summ_chains_Nasal$quantiles['Group-Clinical assessment', 1]*2, 2))
+(Nasal_UL <- round(summ_chains_Nasal$quantiles['Group-Clinical assessment', 5]*2, 2))
+
+CI_NasalReport<-paste('[', Nasal_LL,',',Nasal_UL,']')
+
+# Analysis with pre-registered narrow prior
+set.seed(123)
+bf_Nasal_Group_narrow <- lmBF(formula = Smell_change ~ Nasal_obstruction_change + Group, data = data_GCCR001, rscaleFixed = .5)
+bf_Group_narrow <- lmBF(formula = Smell_change ~ Group, data = data_GCCR001, rscaleFixed = .5)
+bf_Nasal_narrow <- bf_Nasal_Group_narrow/bf_Group_narrow
+# Evidence for H1
+bf_Nasal_narrow
+# Evidence for H0
+1/bf_Nasal_narrow
+
+# Analysis with pre-registered wide prior
+set.seed(123)
+bf_Nasal_Group_wide <- lmBF(formula = Smell_change ~ Nasal_obstruction_change + Group, data = data_GCCR001, rscaleFixed = 1)
+bf_Group_wide <- lmBF(formula = Smell_change ~ Group, data = data_GCCR001, rscaleFixed = 1)
+bf_Nasal_wide <- bf_Nasal_Group_wide/bf_Group_wide
+# Evidence for H1
+bf_Nasal_wide
+# Evidence for H0
+1/bf_Nasal_wide
+
+sd(data_GCCR001$Nasal_obstruction_change)
+mean(data_GCCR001$Nasal_obstruction_change)
+
+
+########################################
+#Chemosensory clustering
+########################################
+keeps_FA2 <- c("Smell_change", "Taste_change", "Chemesthesis_change")
+data_FA2 <- data_GCCR001[keeps_FA2]
+#nb <- NbClust(data_FA2, distance = "euclidean", min.nc = 2, max.nc = 10, method = "kmeans")
+#nb
+# 14 proposed 3 as the best number of clusters 
+
+# K-Means Cluster Analysis
+# for reproducibility
+set.seed(123)
+fit <- kmeans(data_FA2, 3) # 3 clusters solution
+fit$centers
+
+smell_centroid1<-fit$centers[1,1] %>% round(2)
+taste_centroid1<-fit$centers[1,2] %>% round(2)
+chemesthesis_centroid1<-fit$centers[1,3] %>% round(2)
+smell_centroid2<-fit$centers[2,1] %>% round(2)
+taste_centroid2<-fit$centers[2,2] %>% round(2)
+chemesthesis_centroid2<-fit$centers[2,3] %>% round(2)
+smell_centroid3<-fit$centers[3,1] %>% round(2)
+taste_centroid3<-fit$centers[3,2] %>% round(2)
+chemesthesis_centroid3<-fit$centers[3,3] %>% round(2)
+
+# Stability of the cluster
+set.seed(123)
+stabilityReport<- stability(data_FA2, k = 3, B=100, r=5, scheme_2 = TRUE)
+stabilityReport$overall %>% round(2)
+data_FA3 <- data.frame(data_FA2, fit$cluster)
+
+
+
+# FIGURES
+
+# Figure 1 was created in word and is included in the paper folder of the research compendium
+# All additional figures have been edited in Illustrator. 
+
+########################################
+#Figure 2 by Nicola Piratsu
+########################################
+
+# Panel A
+df.plot=reshape::melt(as.data.frame(data_GCCR001[,c("Smell_before_illness", "Smell_during_illness","Group")]))
+df.plot$variable=recode_factor(df.plot$variable,Smell_before_illness="Before COVID-19",Smell_during_illness="During COVID-19")
+names(df.plot)=c("covid.status","time","all.rating")
+sumrepdat <- summarySE(df.plot, measurevar = "all.rating", groupvars=c("covid.status", "time"))
+offset=ifelse(df.plot$time=="Before COVID-19",1,-1)
+a=ggplot(df.plot[df.plot$time=="Before COVID-19"& df.plot$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.cl=ggplot_build(a)
+dens.before.cl=dens.before.cl$data[[1]][,c("y","scaled")]
+dens.before.cl$scaled[1]=0
+dens.before.cl$scaled[nrow(dens.before.cl)]=0
+a=ggplot(df.plot[df.plot$time=="During COVID-19"& df.plot$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.cl=ggplot_build(a)
+dens.during.cl=dens.during.cl$data[[1]][,c("y","scaled")]
+dens.during.cl$scaled[1]=0
+dens.during.cl$scaled[nrow(dens.during.cl)]=0
+a=ggplot(df.plot[df.plot$time=="Before COVID-19"& df.plot$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.lab=ggplot_build(a)
+dens.before.lab=dens.before.lab$data[[1]][,c("y","scaled")]
+dens.before.lab$scaled[1]=0
+dens.before.lab$scaled[nrow(dens.before.lab)]=0
+a=ggplot(df.plot[df.plot$time=="During COVID-19"& df.plot$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.lab=ggplot_build(a)
+dens.during.lab=dens.during.lab$data[[1]][,c("y","scaled")]
+dens.during.lab$scaled[1]=0
+dens.during.lab$scaled[nrow(dens.during.lab)]=0
+
+jpeg("Figure2A.jpeg", width = 7, height =6, units = 'in', res = 300)
+p1 <- ggplot(df.plot, aes(x = time, y = all.rating, fill = covid.status)) +
+  #geom_flat_violin(aes(fill = covid.status, y=all.rating, x = ..density..),position = position_nudge(x = .1, y = 0), adjust = 1.5, trim = FALSE, alpha = .5, colour = "grey24")+
+  geom_boxplot(aes(x = time, y = all.rating, fill = covid.status),outlier.shape = NA, width = .1, colour = "black")+
+  geom_polygon(data = dens.before.cl, aes(x=scaled/3+1.1,y=y),fill="#ababff",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.before.lab, aes(x=scaled/3+1.1,y=y),fill="#6666ff",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.cl, aes(x=(((scaled/3)*-1)+2)-0.1,y=y),fill="#ababff",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.lab, aes(x=(((scaled/3)*-1)+2)-0.1,y=y),fill="#6666ff",colour = "grey24",alpha=.5)+
+  geom_point(aes(x = as.numeric(time)+(-.15*offset), y = all.rating, colour = covid.status),position = position_jitter(width = .05), size = 1, shape = 20)+
+  geom_line(data = sumrepdat, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), linetype = 2)+
+  geom_point(data = sumrepdat, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), shape = 18) +
+  geom_errorbar(data = sumrepdat, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status, ymin = all.rating-ci, ymax = all.rating+ci),size=1, width = .05)+
+  theme_minimal()+
+  theme(axis.title=element_text(size=20,face="bold"),axis.text.x=element_text(size=20),axis.text.y=element_text(size=20) )+
+  ylab("Smell rating") + xlab("Time") + scale_fill_manual("COVID diagnosis",values=c("#ababff", "#6666ff")) + scale_color_manual("COVID diagnosis",values=c("#ababff","#6666ff"))  +theme(plot.title = element_blank(),axis.line = element_line(colour = "black"),text = element_text(size=20),legend.position ="top" ) + coord_cartesian(ylim=c(0, 100))
+
+p1
+dev.off()
+
+# Panel B - Taste
+df.plot3=reshape::melt(as.data.frame(data_GCCR001[,c("Taste_before_illness", "Taste_during_illness","Group")]))
+df.plot3$variable=recode_factor(df.plot3$variable,Taste_before_illness="Before COVID-19",Taste_during_illness="During COVID-19")
+names(df.plot3)=c("covid.status","time","all.rating")
+sumrepdat3 <- summarySE(df.plot3, measurevar = "all.rating", groupvars=c("covid.status", "time"))
+
+offset=ifelse(df.plot$time=="Before COVID-19",1,-1)
+
+a=ggplot(df.plot3[df.plot3$time=="Before COVID-19"& df.plot3$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.cl3=ggplot_build(a)
+dens.before.cl3=dens.before.cl3$data[[1]][,c("y","density")]
+dens.before.cl3$density[1]=0
+dens.before.cl3$density[nrow(dens.before.cl3)]=0
+
+a=ggplot(df.plot3[df.plot3$time=="During COVID-19"& df.plot3$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.cl3=ggplot_build(a)
+dens.during.cl3=dens.during.cl3$data[[1]][,c("y","density")]
+dens.during.cl3$density[1]=0
+dens.during.cl3$density[nrow(dens.during.cl3)]=0
+
+a=ggplot(df.plot3[df.plot3$time=="Before COVID-19"& df.plot3$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.lab3=ggplot_build(a)
+dens.before.lab3=dens.before.lab3$data[[1]][,c("y","density")]
+dens.before.lab3$density[1]=0
+dens.before.lab3$density[nrow(dens.before.lab3)]=0
+
+a=ggplot(df.plot3[df.plot3$time=="During COVID-19"& df.plot3$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.lab3=ggplot_build(a)
+dens.during.lab3=dens.during.lab3$data[[1]][,c("y","density")]
+dens.during.lab3$density[1]=0
+dens.during.lab3$density[nrow(dens.during.lab3)]=0
+
+jpeg("Figure2B.jpeg", width = 7, height =6, units = 'in', res = 300)
+p3 <- ggplot(df.plot3, aes(x = time, y = all.rating, fill = covid.status)) +
+  #geom_flat_violin(aes(fill = covid.status, y=all.rating, x = ..density..),position = position_nudge(x = .1, y = 0), adjust = 1.5, trim = FALSE, alpha = .5, colour = "grey24")+
+  geom_boxplot(aes(x = time, y = all.rating, fill = covid.status),outlier.shape = NA, width = .1, colour = "black")+
+  geom_polygon(data = dens.before.cl3, aes(x=density*4+1.1,y=y),fill="#fa7f7f",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.before.lab3, aes(x=density*4+1.1,y=y),fill="#ff0000",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.cl3, aes(x=(((density*4)*-1)+2)-0.1,y=y),fill="#fa7f7f",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.lab3, aes(x=(((density*4)*-1)+2)-0.1,y=y),fill="#ff0000",colour = "grey24",alpha=.5)+
+  geom_point(aes(x = as.numeric(time)+(-.15*offset), y = all.rating, colour = covid.status),position = position_jitter(width = .05), size = 1, shape = 20)+
+  geom_line(data = sumrepdat3, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), linetype = 2)+
+  geom_point(data = sumrepdat3, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), shape = 18) +
+  geom_errorbar(data = sumrepdat3, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status, ymin = all.rating-ci, ymax = all.rating+ci),size=1, width = .05)+
+  theme_minimal()+
+  theme(axis.title=element_text(size=20,face="bold"),axis.text.x=element_text(size=20),axis.text.y=element_text(size=20) )+
+  ylab("Taste rating") + xlab("Time") + scale_fill_manual("COVID diagnosis",values=c("#fa7f7f","#ff0000")) + scale_color_manual("COVID diagnosis",values=c("#fa7f7f","#ff0000"))  +theme(plot.title = element_blank(),axis.line = element_line(colour = "black"),text = element_text(size=20),legend.position ="top" ) + coord_cartesian(ylim=c(0, 100))
+
+p3
+dev.off()
+
+# Panel C - Chemesthesis
+df.plot4=reshape::melt(as.data.frame(data_GCCR001[,c("Chemethesis_before_illness", "Chemesthesis_during_illness","Group")]))
+df.plot4$variable=recode_factor(df.plot4$variable, Chemethesis_before_illness="Before COVID-19", Chemesthesis_during_illness="During COVID-19")
+names(df.plot4)=c("covid.status","time","all.rating")
+sumrepdat4 <- summarySE(df.plot4, measurevar = "all.rating", groupvars=c("covid.status", "time"))
+
+offset=ifelse(df.plot4$time=="Before COVID-19",1,-1)
+
+a=ggplot(df.plot4[df.plot4$time=="Before COVID-19"& df.plot4$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.cl4=ggplot_build(a)
+dens.before.cl4=dens.before.cl4$data[[1]][,c("y","density")]
+dens.before.cl4$density[1]=0
+dens.before.cl4$density[nrow(dens.before.cl4)]=0
+
+a=ggplot(df.plot4[df.plot4$time=="During COVID-19"& df.plot4$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.cl4=ggplot_build(a)
+dens.during.cl4=dens.during.cl4$data[[1]][,c("y","density")]
+dens.during.cl4$density[1]=0
+dens.during.cl4$density[nrow(dens.during.cl4)]=0
+
+a=ggplot(df.plot4[df.plot4$time=="Before COVID-19"& df.plot4$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.lab4=ggplot_build(a)
+dens.before.lab4=dens.before.lab4$data[[1]][,c("y","density")]
+dens.before.lab4$density[1]=0
+dens.before.lab4$density[nrow(dens.before.lab4)]=0
+
+a=ggplot(df.plot4[df.plot4$time=="During COVID-19"& df.plot4$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.lab4=ggplot_build(a)
+dens.during.lab4=dens.during.lab4$data[[1]][,c("y","density")]
+dens.during.lab4$density[1]=0
+dens.during.lab4$density[nrow(dens.during.lab4)]=0
+
+jpeg("Figure2C.jpeg", width = 7, height =6, units = 'in', res = 300)
+p4 <- ggplot(df.plot4, aes(x = time, y = all.rating, fill = covid.status)) +
+  #geom_flat_violin(aes(fill = covid.status, y=all.rating, x = ..density..),position = position_nudge(x = .1, y = 0), adjust = 1.5, trim = FALSE, alpha = .5, colour = "grey24")+
+  geom_boxplot(aes(x = time, y = all.rating, fill = covid.status),outlier.shape = NA, width = .1, colour = "black")+
+  geom_polygon(data = dens.before.cl3, aes(x=density*4+1.1,y=y),fill="#ffff00",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.before.lab3, aes(x=density*4+1.1,y=y),fill="#ffd505",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.cl3, aes(x=(((density*4)*-1)+2)-0.1,y=y),fill="#ffff00",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.lab3, aes(x=(((density*4)*-1)+2)-0.1,y=y),fill="#ffd505",colour = "grey24",alpha=.5)+
+  geom_point(aes(x = as.numeric(time)+(-.15*offset), y = all.rating, colour = covid.status),position = position_jitter(width = .05), size = 1, shape = 20)+
+  geom_line(data = sumrepdat3, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), linetype = 2)+
+  geom_point(data = sumrepdat3, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), shape = 18) +
+  geom_errorbar(data = sumrepdat3, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status, ymin = all.rating-ci, ymax = all.rating+ci),size=1, width = .05)+
+  theme_minimal()+
+  theme(axis.title=element_text(size=20,face="bold"),axis.text.x=element_text(size=20),axis.text.y=element_text(size=20) )+
+  ylab("Chemesthesis rating") + xlab("Time") + scale_fill_manual("COVID diagnosis",values=c("#ffff00", "#ffd505")) + scale_color_manual("COVID diagnosis",values=c("#ffc800", "#fcdc68"))  +theme(plot.title = element_blank(),axis.line = element_line(colour = "black"),text = element_text(size=20),legend.position ="top" ) + coord_cartesian(ylim=c(0, 100))
+p4
+dev.off()
+
+# Multipanel
+
+theme.fig1= theme( axis.text.x =  element_text(size=10),axis.text.y =  element_text(size=10),axis.title =element_text(size=10), legend.text =  element_text(size=7),legend.title = element_text(size=7)  )
+
+
+#jpeg("analysis/paper/GCCR001_Plot_Multipanel_rain.jpeg", width = 5, height = 12, units = 'in', res = 300)
+
+jpeg("Figure2X.jpeg", width = 7, height =6, units = 'in', res = 300)
+figure2<-ggarrange(p1+theme.fig1, p3+theme.fig1, p4+theme.fig1,
+                   labels = c("A", "B", "C"),
+                   ncol = 1, nrow = 3, vjust=1,
+                   font.label = list(size = 10, color = "black"),
+                   common.legend = FALSE, legend = "top")
+
+
+figure2
+dev.off()
+
+########################################
+#Figure 3
+########################################
+data_GCCR001parosmia<- subset(data_GCCR001, parosmia >0)
+data_GCCR001parosmia$Smellquality<- "Parosmia"
+
+data_GCCR001phantosmia<- subset(data_GCCR001, phantosmia >0)
+data_GCCR001phantosmia$Smellquality<- "Phantosmia"
+
+data_GCCR001smellquality<-rbind(data_GCCR001parosmia,data_GCCR001phantosmia)
+table(data_GCCR001smellquality$Group)
+
+str(data_GCCR001smellquality)
+
+jpeg("Figure4X.jpeg", width = 12, height = 5, units = 'in', res = 300)
+# for reproducibility
+set.seed(123)
+
+# correlation matrix plot
+figure4<-ggstatsplot::grouped_ggcorrmat(
+  data = data_GCCR001smellquality,
+  ggstatsplot.layer = FALSE,
+  ggplot.component = list(theme(text = element_text(size = 15))),
+  type = "robust", # correlation method
+  cor.vars = c(Smell_change, smell_loss, parosmia, phantosmia, smell_fluctuations, Nasal_obstruction_change, Taste_change, Chemesthesis_change),
+  cor.vars.names = c(
+    "Smell change", # variable names
+    "Reduced smell",
+    "Parosmia", 
+    "Phantosmia",
+    "Fluctuations",
+    "Blocked nose change",
+    "Taste change",
+    "Chemesthesis change"),
+  sig.level = 0.001, # threshold of significance
+  p.adjust.method = "holm", # p-value adjustment method for multiple comparisons
+  colors = c("#B2182B", "white", "#4D4D4D", "red"),
+  grouping.var = Smellquality, # grouping variable
+  k = 2, # number of digits after decimal point
+  title.prefix = "Reported diagnosis",
+  messages = FALSE,
+  plotgrid.args = list(ncol = 2))
+ dev.off()
+
+ 
+########################################
+#Figure 4
+########################################
+# Panel A - Nasal obstruction
+df.plot2=reshape::melt(as.data.frame(data_GCCR001[,c("Blocked_nose_before_illness","Blocked_nose_during_illness","Group")]))
+df.plot2$variable=recode_factor(df.plot2$variable,Blocked_nose_before_illness="Before COVID-19",Blocked_nose_during_illness="During COVID-19")
+names(df.plot2)=c("covid.status","time","all.rating")
+sumrepdat2 <- summarySE(df.plot2, measurevar = "all.rating", groupvars=c("covid.status", "time"))
+
+offset=ifelse(df.plot2$time=="Before COVID-19",1,-1)
+
+a=ggplot(df.plot2[df.plot2$time=="Before COVID-19"& df.plot2$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.cl2=ggplot_build(a)
+dens.before.cl2=dens.before.cl2$data[[1]][,c("y","density")]
+dens.before.cl2$density[1]=0
+dens.before.cl2$density[nrow(dens.before.cl2)]=0
+
+a=ggplot(df.plot2[df.plot2$time=="During COVID-19"& df.plot2$covid.status!="Clinical assessment",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.cl2=ggplot_build(a)
+dens.during.cl2=dens.during.cl2$data[[1]][,c("y","density")]
+dens.during.cl2$density[1]=0
+dens.during.cl2$density[nrow(dens.during.cl2)]=0
+
+a=ggplot(df.plot2[df.plot2$time=="Before COVID-19"& df.plot2$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.before.lab2=ggplot_build(a)
+dens.before.lab2=dens.before.lab2$data[[1]][,c("y","density")]
+dens.before.lab2$density[1]=0
+dens.before.lab2$density[nrow(dens.before.lab2)]=0
+
+a=ggplot(df.plot2[df.plot2$time=="During COVID-19"& df.plot2$covid.status!="Lab test",], aes(x = time, y = all.rating)) +geom_density()
+dens.during.lab2=ggplot_build(a)
+dens.during.lab2=dens.during.lab2$data[[1]][,c("y","density")]
+dens.during.lab2$density[1]=0
+dens.during.lab2$density[nrow(dens.during.lab2)]=0
+
+jpeg("Figure4A.jpeg", width = 7, height =6, units = 'in', res = 300)
+figure4A <- ggplot(df.plot2, aes(x = time, y = all.rating, fill = covid.status)) +
+  #geom_flat_violin(aes(fill = covid.status, y=all.rating, x = ..density..),position = position_nudge(x = .1, y = 0), adjust = 1.5, trim = FALSE, alpha = .5, colour = "grey24")+
+  geom_boxplot(aes(x = time, y = all.rating, fill = covid.status),outlier.shape = NA, width = .1, colour = "black")+
+  geom_polygon(data = dens.before.cl2, aes(x=density*4+1.1,y=y),fill="#fcb1fc",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.before.lab2, aes(x=density*4+1.1,y=y),fill="#ff00ff",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.cl2, aes(x=(((density*4)*-1)+2)-0.1,y=y),fill="#fcb1fc",colour = "grey24",alpha=.5)+
+  geom_polygon(data = dens.during.lab2, aes(x=(((density*4)*-1)+2)-0.1,y=y),fill="#ff00ff",colour = "grey24",alpha=.5)+
+  geom_point(aes(x = as.numeric(time)+(-.15*offset), y = all.rating, colour = covid.status),position = position_jitter(width = .05), size = 1, shape = 20)+
+  geom_line(data = sumrepdat2, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), linetype = 2)+
+  geom_point(data = sumrepdat2, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status), shape = 18) +
+  geom_errorbar(data = sumrepdat2, aes(x = as.numeric(time)+.15*(ifelse(time=="Before COVID-19",1,-1)), y = all.rating, group = covid.status, colour = covid.status, ymin = all.rating-ci, ymax = all.rating+ci),size=1, width = .05)+
+  theme_minimal()+
+  theme(axis.title=element_text(size=20,face="bold"),axis.text.x=element_text(size=20),axis.text.y=element_text(size=20) )+
+  ylab("Nasal obstruction rating") + xlab("Time") + scale_fill_manual("COVID diagnosis",values=c("#fcb1fc", "#ff00ff")) + scale_color_manual("COVID diagnosis",values=c("#f071f0","#f202f2"))  +theme(plot.title = element_blank(),axis.line = element_line(colour = "black"),text = element_text(size=20),legend.position ="top" ) + coord_cartesian(ylim=c(0, 100))
+
+figure4A
+dev.off()
+ 
+# Panel B 
+df.pc=data_GCCR001[,c("Smell_change","Taste_change","Chemesthesis_change","Nasal_obstruction_change")]
+names(df.pc)=c("Smell change","Taste change","Chemesthesis change","Nasal obstruction change")
+pc.all=prcomp(df.pc,scale = TRUE) # PCA with nasal blockage difference
+var <- get_pca_var(pc.all)
+var$cor
+
+figure4B<-fviz_pca_var(pc.all,col.var = "contrib",arrowsize = 1,
+                             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+                             repel=TRUE, title = "")+
+                             guides(size = FALSE, shape= FALSE)+
+                             theme_classic()+geom_text(aes(label=""))
+
+
+
+jpeg("Figure4.jpeg", width = 18, height =6, units = 'in', res = 300)
+figure4<-ggarrange(figure4A, figure4B,
+                    labels = c("A", "B"),
+                    ncol = 2, nrow = 1, vjust=1,
+                    font.label = list(size = 35, color = "black"),
+                    common.legend = FALSE, legend = "top")
+
+dev.off()
+
+
+########################################
+#Figure 5 by Rishemjit Kaur
+########################################
+# Panel A
+keeps_PC <- c("Smell_change","Taste_change","Chemesthesis_change") 
+df.pc <- data_GCCR001[keeps_PC]
+names(df.pc)=c("Smell change","Taste change","Chemesthesis \n change")
+pc.all=prcomp(df.pc ,scale = TRUE) # PCA with nasal blockage difference
+var <- get_pca_var(pc.all)
+colnames(var$cor) <- c("Dim1", "Dim2", "Dim3") #earlier names had . in between
+jpeg("Figure5A.jpeg", width = 7, height =6, units = 'in', res = 300)
+figure5A<-ggcorrplot(t(var$cor), hc.order = FALSE, lab = TRUE, tl.cex = 16, tl.col= "black",  lab_size= 8, colors = c("#B2182B", "white", "#4D4D4D", "red"), outline ="black") +  geom_text(label="", vjust= 1)
+figure5A
+dev.off()
+
+# Panel B
+keeps_FA2 <- c("Smell_change", "Taste_change", "Chemesthesis_change")
+data_FA2 <- data_GCCR001[keeps_FA2]
+#nb <- NbClust(data_FA2, distance = "euclidean", min.nc = 2, max.nc = 10, method = "kmeans")
+#nb
+# 14 proposed 3 as the best number of clusters 
+# K-Means Cluster Analysis
+# for reproducibility
+set.seed(123)
+fit <- kmeans(data_FA2, 3) # 3 clusters solution
+fit$centers
+
+smell_centroid1<-fit$centers[1,1] %>% round(2)
+taste_centroid1<-fit$centers[1,2] %>% round(2)
+chemesthesis_centroid1<-fit$centers[1,3] %>% round(2)
+smell_centroid2<-fit$centers[2,1] %>% round(2)
+taste_centroid2<-fit$centers[2,2] %>% round(2)
+chemesthesis_centroid2<-fit$centers[2,3] %>% round(2)
+smell_centroid3<-fit$centers[3,1] %>% round(2)
+taste_centroid3<-fit$centers[3,2] %>% round(2)
+chemesthesis_centroid3<-fit$centers[3,3] %>% round(2)
+set.seed(123)
+stabilityReport<- stability(data_FA2, k = 3, B=100, r=5, scheme_2 = TRUE)
+stabilityReport$overall %>% round(2)
+
+jpeg("Figure5B.jpeg", width = 9, height =6, units = 'in', res = 300)
+# for reproducibility
+set.seed(123)
+figure5B<-fviz_cluster(fit, data = data_FA2,labels= 0, lines=0, tl.cex=5, cl.cex =1.5, show.clust.cent = TRUE, 
+             cl.offset= -1.1 , cl.align.text ='r', cl.ratio = 0.15,
+             main = "", xlab = "PC1", ylab = "PC2")+
+             scale_fill_manual(name = "cluster", labels = c("Smell, Taste and chemesthesis loss", 
+                                                   "Smell and Taste loss, chemesthesis preserved", 
+                                                   "Smell and Taste reduced, chemesthesis preserved"),
+                               values = c("blue", "orange", "turquoise"))+
+             scale_color_manual(values = c("blue", "orange", "turquoise"), )+
+             guides(color = FALSE, size = FALSE, shape= FALSE, fill =  guide_legend(title.theme = element_text(
+             size = 20), title = ""))+
+             theme_classic()+geom_text(aes(label=""))
+figure5B
+
+
+jpeg("Figure5.jpeg", width = 15, height = 7, units = 'in', res = 300)
+figure5<-ggarrange(figure5A, figure5B,
+                    labels = c("A", "B"),
+                    ncol = 2, nrow = 1, vjust=1,
+                    font.label = list(size = 35, color = "black"),
+                    common.legend = FALSE, legend = "top")
+figure5
+dev.off()
+
+setEPS()
+postscript("figure5B.eps")
+figure5B
+dev.off()
+
+ggsave(
+  "Figure5.eps",
+  figure5,
+  width = 10,
+  height = 6,
+  units = "in",
+  dpi = 300,
+)
+
+
+# TABLES
+########################################
+#Table 2 by Michele Dibattista
+########################################
+#clin
+Smell_before_illness_meanc<- round(mean(data_GCCR001_clin$Smell_before_illness), digits=2)
+Smell_before_illness_sdc<- round(sd(data_GCCR001_clin$Smell_before_illness), digits=2)
+Smell_before_illness_rangec<- round(range(data_GCCR001_clin$Smell_before_illness), digits=2)
+
+Smell_during_illness_meanc<- round(mean(data_GCCR001_clin$Smell_during_illness), digits=2)
+Smell_during_illness_sdc<- round(sd(data_GCCR001_clin$Smell_during_illness), digits=2)
+Smell_during_illness_rangec<- round(range(data_GCCR001_clin$Smell_during_illness), digits=2)
+
+Taste_before_illness_meanc<- round(mean(data_GCCR001_clin$Taste_before_illness), digits=2)
+Taste_before_illness_sdc<- round(sd(data_GCCR001_clin$Taste_before_illness), digits=2)
+Taste_before_illness_rangec<- round(range(data_GCCR001_clin$Taste_before_illness), digits=2)
+
+Taste_during_illness_meanc<- round(mean(data_GCCR001_clin$Taste_during_illness), digits=2)
+Taste_during_illness_sdc<- round(sd(data_GCCR001_clin$Taste_during_illness), digits=2)
+Taste_during_illness_rangec<- round(range(data_GCCR001_clin$Taste_during_illness), digits=2)
+
+Chemesthesis_before_illness_meanc<- round(mean(data_GCCR001_clin$Chemethesis_before_illness), digits=2)
+Chemesthesis_before_illness_sdc<- round(sd(data_GCCR001_clin$Chemethesis_before_illness), digits=2)
+Chemesthesis_before_illness_rangec<- round(range(data_GCCR001_clin$Chemethesis_before_illness), digits=2)
+
+Chemesthesis_during_illness_meanc<- round(mean(data_GCCR001_clin$Chemesthesis_during_illness), digits=2)
+Chemesthesis_during_illness_sdc<- round(sd(data_GCCR001_clin$Chemesthesis_during_illness), digits=2)
+Chemesthesis_during_illness_rangec<- round(range(data_GCCR001_clin$Chemesthesis_during_illness), digits=2)
+
+Blocked_nose_before_illness_meanc<- round(mean(data_GCCR001_clin$Blocked_nose_before_illness), digits=2)
+Blocked_nose_before_illness_sdc<- round(sd(data_GCCR001_clin$Blocked_nose_before_illness), digits=2)
+Blocked_nose_before_illness_rangec<- round(range(data_GCCR001_clin$Blocked_nose_before_illness), digits=2)
+
+Blocked_nose_during_illness_meanc<- round(mean(data_GCCR001_clin$Blocked_nose_during_illness), digits=2)
+Blocked_nose_during_illness_sdc<- round(sd(data_GCCR001_clin$Blocked_nose_during_illness), digits=2)
+Blocked_nose_during_illness_rangec<- round(range(data_GCCR001_clin$Blocked_nose_during_illness), digits=2)
+
+Smell_change_meanc<- round(mean(data_GCCR001_clin$Smell_change), digits=2)
+Smell_change_sdc<- round(sd(data_GCCR001_clin$Smell_change), digits=2)
+Smell_change_rangec<- round(range(data_GCCR001_clin$Smell_change), digits=2)
+
+Taste_change_meanc<- round(mean(data_GCCR001_clin$Taste_change), digits=2)
+Taste_change_sdc<- round(sd(data_GCCR001_clin$Taste_change), digits=2)
+Taste_change_rangec<- round(range(data_GCCR001_clin$Taste_change), digits=2)
+
+Chemesthesis_change_meanc<- round(mean(data_GCCR001_clin$Chemesthesis_change), digits=2)
+Chemesthesis_change_sdc<- round(sd(data_GCCR001_clin$Chemesthesis_change), digits=2)
+Chemesthesis_change_rangec<- round(range(data_GCCR001_clin$Chemesthesis_change), digits=2)
+
+# test
+Smell_before_illness_meant<- round(mean(data_GCCR001_test$Smell_before_illness), digits=2)
+Smell_before_illness_sdt<- round(sd(data_GCCR001_test$Smell_before_illness), digits=2)
+Smell_before_illness_ranget<- round(range(data_GCCR001_test$Smell_before_illness), digits=2)
+
+Smell_during_illness_meant<- round(mean(data_GCCR001_test$Smell_during_illness), digits=2)
+Smell_during_illness_sdt<- round(sd(data_GCCR001_test$Smell_during_illness), digits=2)
+Smell_during_illness_ranget<- round(range(data_GCCR001_test$Smell_during_illness), digits=2)
+
+Taste_before_illness_meant<- round(mean(data_GCCR001_test$Taste_before_illness), digits=2)
+Taste_before_illness_sdt<- round(sd(data_GCCR001_test$Taste_before_illness), digits=2)
+Taste_before_illness_ranget<- round(range(data_GCCR001_test$Taste_before_illness), digits=2)
+
+Taste_during_illness_meant<- round(mean(data_GCCR001_test$Taste_during_illness), digits=2)
+Taste_during_illness_sdt<- round(sd(data_GCCR001_test$Taste_during_illness), digits=2)
+Taste_during_illness_ranget<- round(range(data_GCCR001_test$Taste_during_illness), digits=2)
+
+Chemesthesis_before_illness_meant<- round(mean(data_GCCR001_test$Chemethesis_before_illness), digits=2)
+Chemesthesis_before_illness_sdt<- round(sd(data_GCCR001_test$Chemethesis_before_illness), digits=2)
+Chemesthesis_before_illness_ranget<- round(range(data_GCCR001_test$Chemethesis_before_illness), digits=2)
+
+Chemesthesis_during_illness_meant<- round(mean(data_GCCR001_test$Chemesthesis_during_illness), digits=2)
+Chemesthesis_during_illness_sdt<- round(sd(data_GCCR001_test$Chemesthesis_during_illness), digits=2)
+Chemesthesis_during_illness_ranget<- round(range(data_GCCR001_test$Chemesthesis_during_illness), digits=2)
+
+Blocked_nose_before_illness_meant<- round(mean(data_GCCR001_test$Blocked_nose_before_illness), digits=2)
+Blocked_nose_before_illness_sdt<- round(sd(data_GCCR001_test$Blocked_nose_before_illness), digits=2)
+Blocked_nose_before_illness_ranget<- round(range(data_GCCR001_test$Blocked_nose_before_illness), digits=2)
+
+Blocked_nose_during_illness_meant<- round(mean(data_GCCR001_test$Blocked_nose_during_illness), digits=2)
+Blocked_nose_during_illness_sdt<- round(sd(data_GCCR001_test$Blocked_nose_during_illness), digits=2)
+Blocked_nose_during_illness_ranget<- round(range(data_GCCR001_test$Blocked_nose_during_illness), digits=2)
+
+Smell_change_meant<- round(mean(data_GCCR001_test$Smell_change), digits=2)
+Smell_change_sdt<- round(sd(data_GCCR001_test$Smell_change), digits=2)
+Smell_change_ranget<- round(range(data_GCCR001_test$Smell_change), digits=2)
+
+Taste_change_meant<- round(mean(data_GCCR001_test$Taste_change), digits=2)
+Taste_change_sdt<- round(sd(data_GCCR001_test$Taste_change), digits=2)
+Taste_change_ranget<- round(range(data_GCCR001_test$Taste_change), digits=2)
+
+Chemesthesis_change_meant<- round(mean(data_GCCR001_test$Chemesthesis_change), digits=2)
+Chemesthesis_change_sdt<- round(sd(data_GCCR001_test$Chemesthesis_change), digits=2)
+Chemesthesis_change_ranget<- round(range(data_GCCR001_test$Chemesthesis_change), digits=2)
+
+
+Smell_tb<-c(Smell_before_illness_meanc, Smell_before_illness_sdc,Smell_during_illness_meanc, Smell_during_illness_sdc, Smell_before_illness_meant, Smell_before_illness_sdt, Smell_during_illness_meant, Smell_during_illness_sdt)
+
+Taste_tb<-c(Taste_before_illness_meanc, Taste_before_illness_sdc,Taste_during_illness_meanc, Taste_during_illness_sdc, Taste_before_illness_meant, Taste_before_illness_sdt, Taste_during_illness_meant, Taste_during_illness_sdt)
+
+Chemesthesis_tb<-c(Chemesthesis_before_illness_meanc, Chemesthesis_before_illness_sdc,Chemesthesis_during_illness_meanc, Chemesthesis_during_illness_sdc, Chemesthesis_before_illness_meant, Chemesthesis_before_illness_sdt, Chemesthesis_during_illness_meant, Chemesthesis_during_illness_sdt)
+
+NasalOcclusion_tb<-c(Blocked_nose_before_illness_meanc, Blocked_nose_before_illness_sdc, Blocked_nose_during_illness_meanc, Blocked_nose_during_illness_sdc, Blocked_nose_before_illness_meant, Blocked_nose_before_illness_sdt, Blocked_nose_during_illness_meant, Blocked_nose_during_illness_sdt)
+
+Smell_tb<-c(Smell_before_illness_meanc, Smell_before_illness_sdc,Smell_during_illness_meanc, Smell_during_illness_sdc, Smell_before_illness_meant, Smell_before_illness_sdt, Smell_during_illness_meant, Smell_during_illness_sdt)
+
+Taste_tb<-c(Taste_before_illness_meanc, Taste_before_illness_sdc,Taste_during_illness_meanc, Taste_during_illness_sdc, Taste_before_illness_meant, Taste_before_illness_sdt, Taste_during_illness_meant, Taste_during_illness_sdt)
+
+Chemesthesis_tb<-c(Chemesthesis_before_illness_meanc, Chemesthesis_before_illness_sdc,Chemesthesis_during_illness_meanc, Chemesthesis_during_illness_sdc, Chemesthesis_before_illness_meant, Chemesthesis_before_illness_sdt, Chemesthesis_during_illness_meant, Chemesthesis_during_illness_sdt)
+
+NasalOcclusion_tb<-c(Blocked_nose_before_illness_meanc, Blocked_nose_before_illness_sdc, Blocked_nose_during_illness_meanc, Blocked_nose_during_illness_sdc, Blocked_nose_before_illness_meant, Blocked_nose_before_illness_sdt, Blocked_nose_during_illness_meant, Blocked_nose_during_illness_sdt)
+
+groupname<- c(rep("Clinical assessment",4),  rep("Lab test", 4))
+timename<- c(rep("Before",2),  rep("During", 2),rep("Before",2),  rep("During", 2))
+measurename<-c("Mean", "SD","Mean", "SD","Mean", "SD","Mean", "SD")
+table2df<-as.data.frame(cbind(Smell_tb,Taste_tb,Chemesthesis_tb, NasalOcclusion_tb))
+
+table2df_t<-t(table2df)
+
+table2df_t=cbind(c("Smell", "Taste", "Chemesthesis", "Nasal Obstruction"),table2df_t)
+myft <- flextable(as.data.frame(table2df_t))
+myft=set_header_labels(myft,V1="Variable",  V2="Before", V3="During",V4="Before", V5="During")
+myft=set_header_labels(myft, V1= "Variable", V2="Mean", V3="SD",V4="Mean", V5="SD",V6="Mean", V7="SD",V8="Mean", V9="SD")
+myft=add_header_row(myft, values = c("", "Before COVID-19", "Before COVID-19","During COVID-19","During COVID-19","Before COVID-19","Before COVID-19","During COVID-19","During COVID-19"), top=TRUE)
+myft=merge_h(myft, part = "header")
+myft=add_header_row(myft, values = c("", "Clinical Assessment", "Clinical Assessment","Clinical Assessment","Clinical Assessment","Lab Test","Lab Test","Lab Test","Lab Test"), top=TRUE)
+myft=merge_h(myft, part = "header")
+myft <- bold(myft, part = "header") # bold header
+myft=align(myft, align="center", part="header")
+myft <- set_caption(myft, "Mean and standard deviation (SD) for the ratings of smell, taste, chemesthesis, and nasal obstruction before and during COVID-19 in the Clinical Assessment and Lab Test groups.")
+myft
+
+
+########################################
+#Table 3 by Michele Dibattista
+########################################
+sweettable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_sweet, Group)
+sweet<-sweettable[1,2]
+sweet<-sweettable[2,2]
+
+salttable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_salty, Group)
+salt<-salttable[1,2]
+salt<-salttable[2,2]
+
+bittertable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_bitter, Group)
+bitter<-bittertable[1,2]
+bitter<-bittertable[2,2]
+
+sourtable <- data_GCCR001 %>% tabyl(Changes_in_basic_tastes_sour, Group)
+sour<-sourtable[1,2]
+sour<-sourtable[2,2]
+
+umamitable <- data_GCCR001 %>% tabyl(`Changes_in_basic_tastes_savory/umami`, Group)
+umami<-umamitable[1,2]
+umami<-umamitable[2,2]
+
+Sweet<-c(sweettable[2,2],sweettable[2,3])
+Salty<-c(salttable[2,2],salttable[2,3])
+Bitter<-c(bittertable[2,2],bittertable[2,3])
+Sour<-c(sourtable[2,2],sourtable[2,3])
+Umami<-c(umamitable[2,2],umamitable[2,3])
+
+table3df_t<-t(cbind(Sweet, Salty, Bitter, Sour, Umami))
+
+table3df_t1=cbind(c("Sweet", "Salt", "Bitter", "Sour", "Umami"),table3df_t)
+myft1 <- flextable(as.data.frame(
+  table3df_t1))
+myft1=set_header_labels(myft1,V1="Taste change",  V2="Clinical Assessment \n (N = 2637)", V3="Lab Test \n (N=1402)")
+myft1=merge_h(myft1, part = "header")
+myft1=align(myft1, align="center", part="all")
+myft1<- bold(myft1, part = "header") 
+myft1 <- set_caption(myft1, "Frequency of responses, by group, for changes of specific taste qualities during COVID-19")
+myft1=width(myft1, width = 2)
+myft1
+
+
+# Thank you to Marco Tullio Liuzza and Javier Albayay for having co-created and cross-checked this script.
+```
+
+
